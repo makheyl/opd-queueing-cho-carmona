@@ -183,7 +183,7 @@ html, body {
     color: var(--green-dark);
     line-height: 1.05;
     margin: 0;
-    word-break: break-all;
+    white-space: nowrap;
     max-width: 100%;
 }
 .kiosk-card .badge {
@@ -245,7 +245,7 @@ html, body {
     height: clamp(126px, 19vw, 185px);
     padding: 0.15vw 0.2vw 0.2vw;
 }
-.waiting-col .kiosk-card .queue-number { font-size: clamp(1.3rem, 3.2vw, 4vw); }
+.waiting-col .kiosk-card .queue-number { font-size: clamp(1.1rem, 3vw, 2.4rem); white-space: nowrap; }
 
 /* Pending column: compact cards */
 .pending-col .kiosk-cards {
@@ -260,7 +260,7 @@ html, body {
     height: clamp(80px, 12vw, 140px);
     padding: 0.1vw 0.15vw 0.2vw;
 }
-.pending-col .kiosk-card .queue-number { font-size: clamp(1.2rem, 3vw, 3.5vw); }
+.pending-col .kiosk-card .queue-number { font-size: clamp(1rem, 2.6vw, 2.1rem); white-space: nowrap; }
 .pending-col .kiosk-card .info { font-size: clamp(0.55rem, 0.8vw, 0.85rem); }
 
 /* Serving column: table groups */
@@ -271,6 +271,7 @@ html, body {
     width: 100%;
     justify-items: center;
 }
+.kiosk-col.serving-col { --card-w: clamp(130px, 16vw, 190px); }
 .table-column {
     display: flex;
     flex-direction: column;
@@ -283,20 +284,19 @@ html, body {
     background: var(--surface);
     color: var(--orange);
     border: 2px solid var(--orange);
-    padding: 0.9vw 1.6vw;
+    padding: 0.7vw 0.4vw;
     border-radius: 1vw;
     font-size: clamp(1.1rem, 1.8vw, 2rem);
     font-weight: 800;
     text-align: center;
     box-shadow: var(--shadow-sm);
-    min-width: 100px;
-    width: 100%;
+    width: var(--card-w);
 }
 .serving-card {
-    width: clamp(130px, 16vw, 200px) !important;
+    width: var(--card-w) !important;
     height: clamp(120px, 18vw, 200px) !important;
 }
-.serving-card .queue-number { font-size: clamp(2.1rem, 5.5vw, 6.5vw) !important; }
+.serving-card .queue-number { font-size: clamp(1.8rem, 4.2vw, 3.6rem) !important; white-space: nowrap; }
 
 .kiosk-empty {
     text-align: center;
@@ -325,10 +325,10 @@ html, body {
     .kiosk-stat .value { font-size: 1.7rem; }
     .kiosk-columns { flex-direction: column; gap: 12px; margin-top: 10px; }
     .kiosk-col { flex: none; min-width: 100%; max-width: 100%; margin: 0; max-height: none; overflow: visible; }
-    .kiosk-col.serving-col { min-width: 100%; max-width: 100%; }
+    .kiosk-col.serving-col { min-width: 100%; max-width: 100%; --card-w: clamp(100px, 20vw, 150px); }
     .serving-cards { grid-template-columns: repeat(2, 1fr); gap: 12px; }
-    .serving-card { width: clamp(100px, 20vw, 150px) !important; height: clamp(90px, 18vw, 140px) !important; }
-    .serving-card .queue-number { font-size: clamp(1.7rem, 5vw, 3.6rem) !important; }
+    .serving-card { height: clamp(90px, 18vw, 140px) !important; }
+    .serving-card .queue-number { font-size: clamp(1.4rem, 4vw, 2.6rem) !important; white-space: nowrap; }
     .waiting-col .kiosk-cards, .pending-col .kiosk-cards { grid-template-columns: repeat(4, 1fr); gap: 8px; }
     .waiting-col .kiosk-card { width: clamp(50px, 8vw, 70px); height: clamp(80px, 12vw, 120px); }
     .pending-col .kiosk-card { width: clamp(50px, 8vw, 70px); height: clamp(60px, 10vw, 100px); }
