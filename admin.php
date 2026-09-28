@@ -21,13 +21,35 @@ if ($period === 'week') {
 $startDateStr = $startDate->format('Y-m-d');
 $endDateStr = $endDate->format('Y-m-d');
 
-// Human-friendly label for the range
+// Human-friendly label for the range, e.g. "Today · Monday, Sep 28, 2026"
+$today = date('Y-m-d'); // same clock as the default $date above
+$is_today_base = $base->format('Y-m-d') === $today;
 if ($period === 'day') {
-    $periodLabel = 'Daily Statistics for ' . htmlspecialchars($startDateStr);
+    $periodLabel = ($startDateStr === $today ? 'Today · ' : '') . $startDate->format('l, M j, Y');
 } elseif ($period === 'week') {
-    $periodLabel = 'Weekly Statistics (' . htmlspecialchars($startDateStr) . ' to ' . htmlspecialchars($endDateStr) . ')';
+    $periodLabel = ($is_today_base ? 'This week · ' : 'Week of ') . $startDate->format('M j') . ' – ' . $endDate->format('M j, Y');
 } else {
-    $periodLabel = 'Monthly Statistics for ' . htmlspecialchars($base->format('F Y'));
+    $periodLabel = ($is_today_base ? 'This month · ' : '') . $base->format('F Y');
+}
+$periodLabel = htmlspecialchars($periodLabel);
+
+// Plain words for doctor_appointments_log.action in the detailed log. Codes
+// not listed here are shown as they are.
+const ACTION_LABELS = [
+    'served' => 'Served',
+    'pending' => 'Sent back for requirements',
+    'cancelled' => 'Cancelled',
+    'notified' => 'Called again',
+    'transferred' => 'Transferred',
+];
+
+function action_label($action) {
+    return ACTION_LABELS[$action] ?? $action;
+}
+
+// Width of a volume bar, as a percentage of the largest value.
+function bar_width($value, $max) {
+    return $max > 0 ? max(1, round((int) $value / $max * 100)) : 0;
 }
 
 // Fetch logs for the selected range, sorted by table_number then time
@@ -199,39 +221,46 @@ if (isset($_POST['export_csv'])) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin Reports — Doctor Appointments Log</title>
-<link rel="stylesheet" href="assets/theme.css">
+<title>OPD Queueing — Reports</title>
+<link rel="stylesheet" href="assets/theme.css?v=<?= filemtime(__DIR__ . '/assets/theme.css') ?>">
 </head>
 <body>
-    <?php $page_subtitle = 'Admin Reports'; require 'partials/header.php'; ?>
-    <div class="page">
-        <h1 class="page-title">Doctor Appointments Log &amp; Statistics</h1>
-        <form method="get" class="toolbar-form no-print">
-            <label for="date">Base Date</label>
-            <input class="field" type="date" id="date" name="date" value="<?= htmlspecialchars($date) ?>">
-            <label for="period">Period</label>
-            <select class="field" id="period" name="period">
-                <option value="day" <?= $period === 'day' ? 'selected' : '' ?>>Day</option>
-                <option value="week" <?= $period === 'week' ? 'selected' : '' ?>>Week</option>
-                <option value="month" <?= $period === 'month' ? 'selected' : '' ?>>Month</option>
-            </select>
-            <button type="submit" class="btn">Filter</button>
-        </form>
-        <div class="toolbar-form no-print">
-            <button class="btn btn-outline" onclick="window.print()"><?= opd_icon('printer') ?> Print / Save as PDF</button>
-            <button class="btn btn-subtle" type="button" onclick="toggleDetails()">Show/Hide Detailed Report</button>
-            <form method="post" style="display:inline;">
-                <input type="hidden" name="export_date" value="<?= htmlspecialchars($date) ?>">
-                <input type="hidden" name="export_period" value="<?= htmlspecialchars($period) ?>">
-                <button type="submit" name="export_csv" class="btn"><?= opd_icon('download') ?> Export to CSV</button>
-            </form>
+    <?php $page_subtitle = 'Reports'; $nav_active = 'reports'; require 'partials/header.php'; ?>
+    <div class="page page-wide">
+        <div class="report-toolbar no-print">
+            <div class="period-picker">
+                <a class="btn btn-sm <?= $period === 'day' && $startDateStr === $today ? '' : 'btn-outline' ?>" href="?period=day&amp;date=<?= $today ?>">Today</a>
+                <a class="btn btn-sm <?= $period === 'week' && $is_today_base ? '' : 'btn-outline' ?>" href="?period=week&amp;date=<?= $today ?>">This Week</a>
+                <a class="btn btn-sm <?= $period === 'month' && $is_today_base ? '' : 'btn-outline' ?>" href="?period=month&amp;date=<?= $today ?>">This Month</a>
+                <form method="get" id="otherDayForm">
+                    <input type="hidden" name="period" value="day">
+                    <label for="otherDay">Other day</label>
+                    <input class="field" type="date" id="otherDay" name="date" value="<?= htmlspecialchars($base->format('Y-m-d')) ?>" max="<?= $today ?>">
+                </form>
+                <?php if (!$is_today_base): ?>
+                <span class="other-periods">
+                    See the whole
+                    <a href="?period=week&amp;date=<?= htmlspecialchars($base->format('Y-m-d')) ?>">week</a> or
+                    <a href="?period=month&amp;date=<?= htmlspecialchars($base->format('Y-m-d')) ?>">month</a>
+                </span>
+                <?php endif; ?>
+            </div>
+            <div class="report-actions">
+                <form method="post">
+                    <input type="hidden" name="export_date" value="<?= htmlspecialchars($date) ?>">
+                    <input type="hidden" name="export_period" value="<?= htmlspecialchars($period) ?>">
+                    <button type="submit" name="export_csv" class="btn btn-sm"><?= opd_icon('download') ?> Export CSV</button>
+                </form>
+                <button type="button" class="btn btn-outline btn-sm" onclick="window.print()"><?= opd_icon('printer') ?> Print</button>
+            </div>
         </div>
+
+        <h1 class="reports-title"><?= $periodLabel ?></h1>
 
         <!-- Daily Statistics Section -->
         <div class="stats-section">
-            <h3><?= $periodLabel ?></h3>
             <?php if (count($daily_stats) > 0): ?>
-                <div class="stats-grid">
+                <div class="stats-grid" style="margin-top:0;">
                     <?php
                     $total_served = 0;
                     $total_pending = 0;
@@ -246,21 +275,22 @@ if (isset($_POST['export_csv'])) {
                         // Treat 'Total Patients' as equal to number served
                         $total_patients += $stat['patients_served'];
                     }
+                    $max_served = max(array_map(function ($s) { return (int) $s['patients_served']; }, $daily_stats_by_table));
                     ?>
                     <div class="mini-stat">
-                        <h4>Total Patients Served</h4>
+                        <h4>Served</h4>
                         <div class="value"><?= $total_served ?></div>
                     </div>
                     <div class="mini-stat">
-                        <h4>Total Patients Pending</h4>
+                        <h4>Sent back for requirements</h4>
                         <div class="value"><?= $total_pending ?></div>
                     </div>
                     <div class="mini-stat">
-                        <h4>Total Patients Cancelled</h4>
+                        <h4>Cancelled</h4>
                         <div class="value"><?= $total_cancelled ?></div>
                     </div>
                     <div class="mini-stat">
-                        <h4>Total Patients</h4>
+                        <h4>Total patients (served)</h4>
                         <div class="value"><?= $total_patients ?></div>
                     </div>
                 </div>
@@ -278,7 +308,7 @@ if (isset($_POST['export_csv'])) {
                         <tr>
                             <td><?= htmlspecialchars($stat['date']) ?></td>
                             <td><?= htmlspecialchars($stat['table_number']) ?></td>
-                            <td><?= htmlspecialchars($stat['patients_served']) ?></td>
+                            <td><div class="bar-row"><span><?= htmlspecialchars($stat['patients_served']) ?></span><div class="bar-track"><div class="bar" style="width:<?= bar_width($stat['patients_served'], $max_served) ?>%;"></div></div></div></td>
                             <td><?= htmlspecialchars($stat['patients_pending']) ?></td>
                             <td><?= htmlspecialchars($stat['patients_cancelled']) ?></td>
                             <td><?= htmlspecialchars($stat['patients_served']) ?></td>
@@ -286,11 +316,14 @@ if (isset($_POST['export_csv'])) {
                     <?php endforeach; ?>
                 </table>
             <?php else: ?>
-                <p style="text-align:center; color:var(--text-faint);">No daily statistics found for this date.</p>
+                <p style="text-align:center; color:var(--text-faint);">No patients recorded for this period.</p>
             <?php endif; ?>
         </div>
 
-        <div id="detailed-report" style="display:none; margin-top:22px;">
+        <div class="no-print" style="text-align:center; margin-top:22px;">
+            <button class="btn btn-outline" type="button" id="logToggle" onclick="toggleDetails()">Show detailed log</button>
+        </div>
+        <div id="detailed-report" style="display:none; margin-top:12px;">
         <table class="data-table">
             <tr>
                 <th>Table</th>
@@ -306,36 +339,17 @@ if (isset($_POST['export_csv'])) {
                         <td><?= htmlspecialchars($row['log_time']) ?></td>
                         <td><?= htmlspecialchars($row['doctor_name']) ?></td>
                         <td><?= htmlspecialchars($row['patient_queue_number']) ?></td>
-                        <td><?= htmlspecialchars($row['action']) ?></td>
+                        <td><?= htmlspecialchars(action_label($row['action'])) ?></td>
                     </tr>
                 <?php endforeach; ?>
                 <tr class="total-row">
                     <td colspan="5">Total Appointments: <?= $total ?></td>
                 </tr>
             <?php else: ?>
-                <tr><td colspan="5" class="no-logs">No logs found for this date.</td></tr>
+                <tr><td colspan="5" class="no-logs">Nothing logged for this period.</td></tr>
             <?php endif; ?>
         </table>
         </div>
-        <script>
-        function toggleDetails() {
-            var el = document.getElementById('detailed-report');
-            el.style.display = (el.style.display === 'none' || el.style.display === '') ? 'block' : 'none';
-        }
-        </script>
-        <?php
-        // Calculate totals per table and per doctor (with name normalization)
-        $table_totals = [];
-        $doctor_totals = [];
-        foreach ($logs as $row) {
-            $table = $row['table_number'];
-            $doctor = normalizeDoctorName($row['doctor_name']);
-            if (!isset($table_totals[$table])) $table_totals[$table] = 0;
-            if (!isset($doctor_totals[$doctor])) $doctor_totals[$doctor] = 0;
-            $table_totals[$table]++;
-            $doctor_totals[$doctor]++;
-        }
-        ?>
         <?php if (count($logs) > 0): ?>
         <?php
             // Build totals per table with a list of unique normalized doctor names
@@ -355,9 +369,10 @@ if (isset($_POST['export_csv'])) {
                 }
             }
             ksort($table_totals_details, SORT_NATURAL);
+            $max_table_count = max(array_column($table_totals_details, 'count'));
         ?>
-        <div style="margin-top:24px;">
-            <h3 style="color:var(--green-dark);">Total Appointments per Table (doctor names shown)</h3>
+        <div class="stats-section">
+            <h3>Total Appointments per Table (doctor names shown)</h3>
             <table class="data-table">
                 <tr>
                     <th>Table</th>
@@ -368,13 +383,28 @@ if (isset($_POST['export_csv'])) {
                 <tr>
                     <td><?= htmlspecialchars($tableNumber) ?></td>
                     <td><?= htmlspecialchars(implode(', ', $info['doctors'])) ?></td>
-                    <td><?= $info['count'] ?></td>
+                    <td><div class="bar-row"><span><?= $info['count'] ?></span><div class="bar-track"><div class="bar" style="width:<?= bar_width($info['count'], $max_table_count) ?>%;"></div></div></div></td>
                 </tr>
                 <?php endforeach; ?>
             </table>
+            <p class="hint no-print" style="text-align:center;color:var(--text-faint);font-size:0.8rem;margin:0;">Counts every logged action at the table: served, sent back, cancelled, called again and transferred.</p>
         </div>
         <?php endif; ?>
     </div>
     <?php require 'partials/footer.php'; ?>
+
+    <script>
+    function toggleDetails() {
+        var el = document.getElementById('detailed-report');
+        var open = el.style.display === 'none' || el.style.display === '';
+        el.style.display = open ? 'block' : 'none';
+        document.getElementById('logToggle').textContent = open ? 'Hide detailed log' : 'Show detailed log';
+    }
+
+    // "Other day" applies as soon as a date is picked: no Filter button.
+    document.getElementById('otherDay').addEventListener('change', function() {
+        if (this.value) this.form.submit();
+    });
+    </script>
 </body>
 </html>

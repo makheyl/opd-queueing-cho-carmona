@@ -1,6 +1,11 @@
 <?php
 require 'config.php';
+require 'opd_functions.php';
 session_start();
+
+// Doctor: pick your table, then serve patients one at a time. While nobody is
+// being served, the next patient of each lane is one big button; while
+// someone is, SERVED is the main button and the rest are smaller.
 
 // Function to update daily statistics
 function updateDailyStatistics($conn, $doctor_name, $table_number, $action) {
@@ -68,7 +73,9 @@ if (isset($_POST['serve'])) {
     if ($result && $row = $result->fetch_assoc()) {
         $queue_number = $row['queue_number'];
         $table_number_notify = $row['table_number'];
-        file_put_contents('notify.json', json_encode(['queue_number' => $queue_number, 'table_number' => $table_number_notify, 'timestamp' => time()]));
+        // The display boards announce it (see announce_call()); this panel shows a toast.
+        announce_call($queue_number, $table_number_notify);
+        $_SESSION['doctor_flash'] = "Called #$queue_number to Table $table_number_notify";
     }
     header("Location: " . $_SERVER['PHP_SELF'] . "?doctor_name=" . urlencode($doctor_name) . "&table_number=" . urlencode($table_number));
     exit();
@@ -169,7 +176,11 @@ if (isset($_POST['notify'])) {
         $queue_number = $row['queue_number'];
         $table_number = $row['table_number'];
     }
-    file_put_contents('notify.json', json_encode(['queue_number' => $queue_number, 'table_number' => $table_number, 'timestamp' => time()]));
+    // The display boards announce it again (see announce_call()); this panel shows a toast.
+    if ($queue_number !== '') {
+        announce_call($queue_number, $table_number);
+        $_SESSION['doctor_flash'] = "Called #$queue_number again to Table $table_number";
+    }
     // Log to doctor_appointments_log
     $doctor_name = isset($_POST['doctor_name']) ? $_POST['doctor_name'] : '';
     if ($doctor_name && $table_number) {
@@ -239,317 +250,339 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Re-query came_back after any update
     $came_back = $conn->query("SELECT * FROM queue WHERE status='waiting' AND priority='came_back' AND table_number='$table_number_esc' ORDER BY created_at ASC");
 }
+
+// ---------- render ----------
+
+$show_name_card = !$doctor_name || !$table_number || isset($_GET['change']);
+$flash = $_SESSION['doctor_flash'] ?? '';
+unset($_SESSION['doctor_flash']);
+
+if ($show_name_card) {
+    $recent_names = get_recent_doctor_names($conn);
+} else {
+    // The next patient of each lane, picked exactly as before: walking the
+    // waiting list in its order, the first 'yes', the first 'infectious', the
+    // first 'completed', and the first of everyone else (regular or follow-up).
+    $lanes = ['next' => null, 'yes' => null, 'infectious' => null, 'completed' => null];
+    $lane_counts = ['next' => 0, 'yes' => 0, 'infectious' => 0, 'completed' => 0];
+    while ($row = $waiting->fetch_assoc()) {
+        if ($row['priority'] === 'yes') {
+            $lane = 'yes';
+        } elseif ($row['priority'] === 'infectious') {
+            $lane = 'infectious';
+        } elseif ($row['priority'] === 'completed') {
+            $lane = 'completed';
+        } else {
+            $lane = 'next';
+        }
+        $lane_counts[$lane]++;
+        if ($lanes[$lane] === null) {
+            $lanes[$lane] = $row;
+        }
+    }
+    $lane_buttons = [
+        'next' => ['Next regular', 'N', ''],
+        'yes' => ['Next priority', 'P', 'lane-priority'],
+        'infectious' => ['Next infectious', 'I', 'lane-infectious'],
+        'completed' => ['Next completed', 'C', 'lane-completed'],
+    ];
+    $anyone_waiting = array_sum($lane_counts) > 0;
+
+    $serving_list = $serving->fetch_all(MYSQLI_ASSOC);
+    $current = $serving_list[0] ?? null;
+    $also_serving = array_slice($serving_list, 1);
+    $pending_list = $pending->fetch_all(MYSQLI_ASSOC);
+    $came_back_list = $came_back->fetch_all(MYSQLI_ASSOC);
+
+    // Get daily statistics for all tables
+    $daily_stats = getDailyStatistics($conn);
+    $table_served_counts = [];
+    if ($daily_stats) {
+        while ($row = $daily_stats->fetch_assoc()) {
+            $table_served_counts[$row['table_number']] = $row['patients_served'];
+        }
+    }
+
+    // Get current doctor's statistics
+    $current_doctor_stats = getDailyStatistics($conn, $doctor_name, $table_number);
+    $current_served = 0;
+    $current_cancelled = 0;
+    if ($current_doctor_stats && $current_doctor_stats->num_rows > 0) {
+        $stats = $current_doctor_stats->fetch_assoc();
+        $current_served = $stats['patients_served'];
+        $current_cancelled = $stats['patients_cancelled'];
+    }
+}
+
+// Hidden fields every action form carries, so the handlers can redirect back here.
+function identity_fields($doctor_name, $table_number) {
+    return '<input type="hidden" name="doctor_name" value="' . htmlspecialchars($doctor_name) . '">'
+        . '<input type="hidden" name="table_number" value="' . htmlspecialchars($table_number) . '">';
+}
+
+// SERVED plus the smaller actions for one patient being served. Keyboard
+// letters only on the main (hero) patient, so no two buttons share a letter.
+function render_serving_actions($row, $doctor_name, $table_number, $with_keys) {
+    $id = (int) $row['id'];
+    $ids = identity_fields($doctor_name, $table_number);
+    $key = function ($letter) use ($with_keys) { return $with_keys ? ' data-key="' . $letter . '"' : ''; };
+    $kbd = function ($letter) use ($with_keys) { return $with_keys ? '<kbd>' . $letter . '</kbd>' : ''; };
+    ?>
+    <div class="hero-actions">
+        <form method="post">
+            <input type="hidden" name="done_id" value="<?= $id ?>"><?= $ids ?>
+            <button type="submit" name="done" class="btn btn-big"<?= $key('S') ?>><span>SERVED<?= $kbd('S') ?></span><small>Done with this patient</small></button>
+        </form>
+    </div>
+    <div class="hero-more">
+        <form method="post">
+            <input type="hidden" name="notify_id" value="<?= $id ?>"><?= $ids ?>
+            <button type="submit" name="notify" class="btn btn-outline btn-sm"<?= $key('R') ?>><?= opd_icon('bell') ?> Call again<?= $kbd('R') ?></button>
+        </form>
+        <form method="post">
+            <input type="hidden" name="pending_id" value="<?= $id ?>"><?= $ids ?>
+            <button type="submit" name="pending" class="btn btn-outline btn-sm" title="Send the patient back to complete their requirements"<?= $key('P') ?>>Pending<?= $kbd('P') ?></button>
+        </form>
+        <button type="button" class="btn btn-outline btn-sm" data-open-dialog="transferDialog-<?= $id ?>"<?= $key('T') ?>>Transfer<?= $kbd('T') ?></button>
+        <button type="button" class="btn btn-outline btn-sm" data-open-dialog="cancelDialog-<?= $id ?>"<?= $key('C') ?>><?= opd_icon('x-circle') ?> Cancel<?= $kbd('C') ?></button>
+    </div>
+    <?php
+}
+
+// Transfer (pick a table) and Cancel (asks first) pop-ups for one patient.
+function render_serving_dialogs($row, $doctor_name, $table_number) {
+    $id = (int) $row['id'];
+    $number = htmlspecialchars($row['queue_number']);
+    ?>
+    <div id="transferDialog-<?= $id ?>" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="transferTitle-<?= $id ?>">
+        <div class="modal-box dialog-box">
+            <h3 id="transferTitle-<?= $id ?>">Transfer #<?= $number ?></h3>
+            <p>The patient goes back to the waiting list for the table you pick.</p>
+            <form method="post">
+                <input type="hidden" name="transfer_id" value="<?= $id ?>">
+                <input type="hidden" name="transfer" value="1">
+                <?= identity_fields($doctor_name, $table_number) ?>
+                <div class="table-picker">
+                    <?php for ($t = 1; $t <= OPD_TABLE_COUNT; $t++): ?>
+                    <button type="submit" name="new_table_number" value="<?= $t ?>" class="btn btn-outline"><?= (string) $t === (string) $table_number ? "Table $t (yours)" : "Table $t" ?></button>
+                    <?php endfor; ?>
+                </div>
+            </form>
+            <div class="dialog-actions" style="margin-top:14px;">
+                <button type="button" class="btn btn-subtle" data-close-dialog data-autofocus>Don't transfer</button>
+            </div>
+        </div>
+    </div>
+    <div id="cancelDialog-<?= $id ?>" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cancelTitle-<?= $id ?>">
+        <div class="modal-box dialog-box">
+            <h3 id="cancelTitle-<?= $id ?>">Cancel #<?= $number ?>?</h3>
+            <p>Use this when the patient left or won't be seen. The front desk can put them back in line later.</p>
+            <form method="post" class="dialog-actions">
+                <input type="hidden" name="cancel_id" value="<?= $id ?>">
+                <?= identity_fields($doctor_name, $table_number) ?>
+                <button type="button" class="btn btn-outline" data-close-dialog>Keep</button>
+                <button type="submit" name="cancel" class="btn btn-danger">Yes, cancel</button>
+            </form>
+        </div>
+    </div>
+    <?php
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OPD Queueing — Doctor Panel</title>
-<link rel="stylesheet" href="assets/theme.css">
-<script>
-    // Track click counts for each card
-    const clickCounts = {};
-    function showForm(id) {
-        const form = document.getElementById('form-' + id);
-        if (form.style.display === 'flex') {
-            form.style.display = 'none';
-        } else {
-            document.querySelectorAll('.queue-form').forEach(f => f.style.display = 'none');
-            form.style.display = 'flex';
-        }
-    }
-    function hideForm(id) {
-        document.getElementById('form-' + id).style.display = 'none';
-    }
-    // Keyboard support for clickable queue cards (Enter / Space activates, same as a click)
-    function cardKeydown(event, id) {
-        if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
-            event.preventDefault();
-            showForm(id);
-        }
-    }
-
-    // Toggle transfer input visibility for a serving card
-    function toggleTransfer(id) {
-        const box = document.getElementById('transfer-box-' + id);
-        if (!box) return;
-        if (box.style.display === 'flex') {
-            box.style.display = 'none';
-        } else {
-            box.style.display = 'flex';
-            const input = box.querySelector('input[name="new_table_number"]');
-            if (input) input.focus();
-        }
-    }
-
-    // --- Auto-refresh on DB update ---
-    let lastStatus = null;
-    async function pollQueueStatus() {
-        try {
-            const res = await fetch('queue_status.php');
-            if (!res.ok) return;
-            const data = await res.json();
-            if (lastStatus === null) {
-                lastStatus = JSON.stringify(data);
-            } else if (JSON.stringify(data) !== lastStatus) {
-                location.reload();
-            }
-        } catch (e) {}
-        setTimeout(pollQueueStatus, 1000);
-    }
-    pollQueueStatus();
-
-    let lastNotified = 0;
-    function pollNotify() {
-        fetch('notify.json?rand=' + Math.random())
-            .then(res => res.json())
-            .then(data => {
-                console.log('Fetched notify.json:', data, 'lastNotified:', lastNotified);
-                if (data && data.timestamp && data.timestamp > lastNotified) {
-                    console.log('Triggering voice notification!');
-                    lastNotified = data.timestamp;
-                    const msg = `Queue number ${data.queue_number}, queue number ${data.queue_number}, please proceed to table ${data.table_number}`;
-                    if ('speechSynthesis' in window) {
-                        window.speechSynthesis.cancel();
-                        const utter = new SpeechSynthesisUtterance(msg);
-                        utter.lang = 'en-US';
-                        window.speechSynthesis.speak(utter);
-                    } else {
-                        console.log('speechSynthesis not supported in this browser.');
-                    }
-                    fetch('clear_notify.php?rand=' + Math.random());
-                }
-            })
-            .catch((err) => { console.log('Error fetching or parsing notify.json:', err); });
-        setTimeout(pollNotify, 50);
-    }
-    document.addEventListener('DOMContentLoaded', pollNotify);
-</script>
+<title>OPD Queueing — Doctor</title>
+<link rel="stylesheet" href="assets/theme.css?v=<?= filemtime(__DIR__ . '/assets/theme.css') ?>">
 </head>
 <body>
-    <?php $page_subtitle = 'Doctor Panel'; require 'partials/header.php'; ?>
-    <div class="page page-wide">
-        <form class="toolbar-form" method="get">
-            <label for="doctor_name">Your Name</label>
-            <input class="field" type="text" id="doctor_name" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>" required>
-            <label for="table_number">Table Number</label>
-            <input class="field" type="number" id="table_number" name="table_number" value="<?= htmlspecialchars($table_number) ?>" required>
-            <button type="submit" class="btn">Set</button>
-        </form>
-
-        <?php if ($doctor_name && $table_number): ?>
-        <?php
-        // Get daily statistics for all tables
-        $today = date('Y-m-d');
-        $daily_stats = getDailyStatistics($conn);
-        $table_served_counts = [];
-
-        if ($daily_stats) {
-            while ($row = $daily_stats->fetch_assoc()) {
-                $table_served_counts[$row['table_number']] = $row['patients_served'];
-            }
-        }
-
-        // Get current doctor's statistics
-        $current_doctor_stats = getDailyStatistics($conn, $doctor_name, $table_number);
-        $current_served = 0;
-        $current_pending = 0;
-        $current_cancelled = 0;
-
-        if ($current_doctor_stats && $current_doctor_stats->num_rows > 0) {
-            $stats = $current_doctor_stats->fetch_assoc();
-            $current_served = $stats['patients_served'];
-            $current_pending = $stats['patients_pending'];
-            $current_cancelled = $stats['patients_cancelled'];
-        }
-
-        function renderTableBadges($table_served_counts) {
-            $out = '';
-            foreach ($table_served_counts as $tnum => $cnt) {
-                $out .= '<span class="badge badge-completed" style="background:#e3f2fd;color:#1976d2;">T'.htmlspecialchars($tnum).': '.$cnt.'</span>';
-            }
-            return $out;
-        }
-        ?>
-        <div class="stat-cards">
-            <div class="stat-card">
-                <span class="stat-label">Waiting</span>
-                <span class="stat-value"><?php $result = $conn->query("SELECT COUNT(*) as cnt FROM queue WHERE status='waiting'"); $row = $result->fetch_assoc(); echo $row['cnt']; ?></span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-label">Serving (You)</span>
-                <span class="stat-value"><?php $result = $conn->query("SELECT COUNT(*) as cnt FROM queue WHERE status='serving' AND doctor_name='".$conn->real_escape_string($doctor_name)."'"); $row = $result->fetch_assoc(); echo $row['cnt']; ?></span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-label">Served Today</span>
-                <span class="stat-value"><?= $current_served ?></span>
-                <div class="stat-extra"><?php echo renderTableBadges($table_served_counts); ?></div>
-            </div>
-            <div class="stat-card">
-                <span class="stat-label">Cancelled Today</span>
-                <span class="stat-value"><?= $current_cancelled ?></span>
-            </div>
-        </div>
-
-        <div class="main-columns">
-        <div class="queue-section">
-            <h3 class="section-title accent-green">Waiting Queue</h3>
-            <div class="queue-grid">
-                <?php
-                $waiting->data_seek(0);
-                $shown_priority = false;
-                $shown_infectious = false;
-                $shown_completed = false;
-                $shown_next = false;
-                while($row = $waiting->fetch_assoc()):
-                    if ($row['priority'] === 'yes') {
-                        if ($shown_priority) continue;
-                        $shown_priority = true;
-                    } elseif ($row['priority'] === 'infectious') {
-                        if ($shown_infectious) continue;
-                        $shown_infectious = true;
-                    } elseif ($row['priority'] === 'completed') {
-                        if ($shown_completed) continue;
-                        $shown_completed = true;
-                    } elseif (!$shown_next) {
-                        // Show the next normal waiting number
-                        $shown_next = true;
-                    } else {
-                        // Hide other normal waiting numbers
-                        continue;
-                    }
-                ?>
-                <div class="queue-card doctor-card clickable<?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious') echo ' priority'; if ($row['priority'] === 'completed') echo ' completed'; if ($row['priority'] === 'came_back') echo ' cameback'; ?>" onclick="showForm(<?= $row['id'] ?>)" onkeydown="cardKeydown(event, <?= $row['id'] ?>)" tabindex="0" role="button">
-                    <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
-                    <?php if ($row['priority'] === 'yes'): ?>
-                        <span class="badge badge-priority">PRIORITY</span>
-                    <?php elseif ($row['priority'] === 'infectious'): ?>
-                        <span class="badge badge-infectious">INFECTIOUS</span>
-                    <?php elseif ($row['priority'] === 'completed'): ?>
-                        <span class="badge badge-completed">COMPLETED</span>
-                        <?php if (!empty($row['doctor_name']) || !empty($row['table_number'])): ?>
-                        <div class="info">
-                            <?= htmlspecialchars($row['doctor_name']) ?><?= ($row['doctor_name'] && $row['table_number']) ? ' - ' : '' ?><?= htmlspecialchars($row['table_number']) ?>
-                        </div>
-                        <?php endif; ?>
-                    <?php elseif ($row['priority'] === 'came_back'): ?>
-                        <span class="badge badge-cameback">CAME BACK</span>
-                    <?php endif; ?>
-                    <?php if ($row['priority'] !== 'completed' && (!empty($row['doctor_name']) || !empty($row['table_number']))): ?>
-                    <div class="info">
-                        <?= htmlspecialchars($row['doctor_name']) ?><?= ($row['doctor_name'] && $row['table_number']) ? ' - ' : '' ?><?= htmlspecialchars($row['table_number']) ?>
-                    </div>
-                    <?php endif; ?>
-                    <form class="queue-form card-form" id="form-<?= $row['id'] ?>" method="post" style="display:none;" onsubmit="hideForm(<?= $row['id'] ?>)">
-                        <input type="hidden" name="serve_id" value="<?= $row['id'] ?>">
-                        <input type="hidden" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>">
-                        <input type="hidden" name="table_number" value="<?= htmlspecialchars($table_number) ?>">
-                        <button type="submit" name="serve" class="btn">Serve</button>
-                    </form>
+    <?php
+    $page_subtitle = 'Doctor';
+    $nav_active = 'doctor';
+    $staff_name = $show_name_card ? '' : $doctor_name . ' · Table ' . $table_number;
+    $change_url = 'doctor.php?change=1';
+    require 'partials/header.php';
+    ?>
+    <div class="page">
+        <?php if ($show_name_card): ?>
+        <div class="name-card">
+            <h2>Who's at the table?</h2>
+            <p>Type or pick your name, then tap your table.</p>
+            <form method="get" class="stacked" id="doctorForm">
+                <input class="field" type="text" name="doctor_name" id="doctor_name" list="recentNames" value="<?= htmlspecialchars($doctor_name) ?>" placeholder="Your name" autocomplete="off" required autofocus>
+                <div class="dialog-label">Your table</div>
+                <div class="table-picker">
+                    <?php for ($t = 1; $t <= OPD_TABLE_COUNT; $t++): ?>
+                    <button type="submit" name="table_number" value="<?= $t ?>" class="btn btn-outline<?= (string) $t === (string) $table_number ? ' is-current' : '' ?>">Table <?= $t ?></button>
+                    <?php endfor; ?>
                 </div>
-                <?php endwhile; ?>
-            </div>
+            </form>
+            <datalist id="recentNames">
+                <?php foreach ($recent_names as $name): ?>
+                <option value="<?= htmlspecialchars($name) ?>">
+                <?php endforeach; ?>
+            </datalist>
         </div>
-        <div class="queue-section">
-            <h3 class="section-title accent-green">Currently Serving (You)</h3>
-            <div class="queue-grid">
-                <?php $serving->data_seek(0); while($row = $serving->fetch_assoc()): ?>
-                <div class="queue-card doctor-card<?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious') echo ' priority'; if ($row['priority'] === 'completed') echo ' completed'; ?>">
-                    <form method="post" class="notify-btn-topright" style="margin:0;">
-                        <input type="hidden" name="notify_id" value="<?= $row['id'] ?>">
-                        <input type="hidden" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>">
-                        <input type="hidden" name="table_number" value="<?= htmlspecialchars($table_number) ?>">
-                        <button type="submit" name="notify" class="btn btn-info btn-xs"><?= opd_icon('bell') ?> Notify</button>
-                    </form>
-                    <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
-                    <?php if ($row['priority'] === 'yes'): ?>
-                        <span class="badge badge-priority">PRIORITY</span>
-                    <?php elseif ($row['priority'] === 'infectious'): ?>
-                        <span class="badge badge-infectious">INFECTIOUS</span>
-                    <?php elseif ($row['priority'] === 'completed'): ?>
-                        <span class="badge badge-completed">COMPLETED</span>
+        <?php else: ?>
+
+        <div class="work-area">
+            <section class="hero-card <?= $current ? lane_class($current['priority']) : '' ?>" aria-label="Now serving">
+                <div class="hero-label">Now Serving — Table <?= htmlspecialchars($table_number) ?></div>
+                <?php if ($current): ?>
+                    <div class="hero-number"><?= htmlspecialchars($current['queue_number']) ?></div>
+                    <?= lane_badge($current['priority']) ?>
+                    <?php if (!empty($current['doctor_name']) || !empty($current['table_number'])): ?>
+                    <div class="hero-meta"><?= htmlspecialchars($current['doctor_name']) ?><?= ($current['doctor_name'] && $current['table_number']) ? ' · Table ' : '' ?><?= htmlspecialchars($current['table_number']) ?></div>
                     <?php endif; ?>
-                    <?php if (!empty($row['doctor_name']) || !empty($row['table_number'])): ?>
-                    <div class="info">
-                        <?= htmlspecialchars($row['doctor_name']) ?><?= ($row['doctor_name'] && $row['table_number']) ? ' - ' : '' ?><?= htmlspecialchars($row['table_number']) ?>
-                    </div>
-                    <?php endif; ?>
-                    <div class="card-actions">
-                        <form method="post" style="display:inline">
-                            <input type="hidden" name="done_id" value="<?= $row['id'] ?>">
-                            <input type="hidden" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>">
-                            <input type="hidden" name="table_number" value="<?= htmlspecialchars($table_number) ?>">
-                            <button type="submit" name="done" class="btn btn-xs">Served</button>
+                    <?php render_serving_actions($current, $doctor_name, $table_number, true); ?>
+                <?php else: ?>
+                    <div class="hero-empty"><?= $anyone_waiting ? 'Choose who to serve next.' : 'No one is waiting for your table.' ?></div>
+                    <?php if ($anyone_waiting): ?>
+                    <div class="lane-actions">
+                        <?php foreach ($lane_buttons as $lane => [$label, $letter, $class]): if (!$lanes[$lane]) continue; $row = $lanes[$lane]; ?>
+                        <form method="post">
+                            <input type="hidden" name="serve" value="1">
+                            <?= identity_fields($doctor_name, $table_number) ?>
+                            <button type="submit" name="serve_id" value="<?= (int) $row['id'] ?>" class="btn btn-big <?= $class ?>" data-key="<?= $letter ?>">
+                                <span><?= strtoupper($label) ?> #<?= htmlspecialchars($row['queue_number']) ?><kbd><?= $letter ?></kbd></span>
+                                <small><?= $row['priority'] === 'follow_up' ? 'Follow-up · ' : '' ?><?= $lane_counts[$lane] ?> waiting</small>
+                            </button>
                         </form>
-                        <form method="post" style="display:inline">
-                            <input type="hidden" name="pending_id" value="<?= $row['id'] ?>">
-                            <input type="hidden" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>">
-                            <input type="hidden" name="table_number" value="<?= htmlspecialchars($table_number) ?>">
-                            <button type="submit" name="pending" class="btn btn-warning btn-xs">Pending</button>
-                        </form>
-                        <button type="button" onclick="toggleTransfer(<?= $row['id'] ?>)" class="btn btn-info btn-xs">Transfer</button>
-                        <form method="post" style="display:inline">
-                            <input type="hidden" name="cancel_id" value="<?= $row['id'] ?>">
-                            <input type="hidden" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>">
-                            <input type="hidden" name="table_number" value="<?= htmlspecialchars($table_number) ?>">
-                            <button type="submit" name="cancel" class="btn btn-danger btn-xs"><?= opd_icon('x-circle') ?> Cancel</button>
-                        </form>
+                        <?php endforeach; ?>
                     </div>
-                    <form method="post" id="transfer-box-<?= $row['id'] ?>" class="transfer-box">
-                        <input type="hidden" name="transfer_id" value="<?= $row['id'] ?>">
-                        <input type="hidden" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>">
-                        <input type="hidden" name="table_number" value="<?= htmlspecialchars($table_number) ?>">
-                        <input class="field" type="number" name="new_table_number" min="1" placeholder="Table #">
-                        <button type="submit" name="transfer" class="btn btn-info btn-xs">Confirm Transfer</button>
-                    </form>
-                </div>
-                <?php endwhile; ?>
-            </div>
-        </div>
-        <div class="queue-section">
-            <h3 class="section-title accent-orange">Pending Patients</h3>
-            <div class="queue-grid">
-                <?php while($row = $pending->fetch_assoc()): ?>
-                <div class="queue-card doctor-card pending">
-                    <span class="badge badge-pending">YET TO BE CONFIRMED</span>
-                    <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
-                    <?php if (!empty($row['doctor_name']) || !empty($row['table_number'])): ?>
-                    <div class="info">
-                        <?= htmlspecialchars($row['doctor_name']) ?><?= ($row['doctor_name'] && $row['table_number']) ? ' - ' : '' ?><?= htmlspecialchars($row['table_number']) ?>
-                    </div>
+                    <?php else: ?>
+                    <button type="button" class="btn btn-big" disabled><span>NEXT PATIENT</span><small>No one waiting</small></button>
                     <?php endif; ?>
-                </div>
-                <?php endwhile; ?>
-            </div>
-        </div>
-        <div class="queue-section">
-            <h3 class="section-title accent-pink">Came Back Patients</h3>
-            <div class="queue-grid">
-                <?php if ($came_back && $came_back->num_rows > 0): while($row = $came_back->fetch_assoc()): ?>
-                <div class="queue-card doctor-card clickable cameback" onclick="showForm(<?= $row['id'] ?>)" onkeydown="cardKeydown(event, <?= $row['id'] ?>)" tabindex="0" role="button">
-                    <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
-                    <span class="badge badge-cameback">CAME BACK</span>
-                    <?php if (!empty($row['doctor_name']) || !empty($row['table_number'])): ?>
-                    <div class="info">
-                        <?= htmlspecialchars($row['doctor_name']) ?><?= ($row['doctor_name'] && $row['table_number']) ? ' - ' : '' ?><?= htmlspecialchars($row['table_number']) ?>
-                    </div>
-                    <?php endif; ?>
-                    <form class="queue-form card-form" id="form-<?= $row['id'] ?>" method="post" style="display:none;" onsubmit="hideForm(<?= $row['id'] ?>)">
-                        <input type="hidden" name="serve_id" value="<?= $row['id'] ?>">
-                        <input type="hidden" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>">
-                        <input type="hidden" name="table_number" value="<?= htmlspecialchars($table_number) ?>">
-                        <button type="submit" name="serve" class="btn">Serve</button>
-                    </form>
-                </div>
-                <?php endwhile; else: ?>
-                <div class="empty-note">No came back patients.</div>
                 <?php endif; ?>
+            </section>
+
+            <aside>
+                <?php if ($also_serving): ?>
+                <section class="side-panel" aria-label="Also serving">
+                    <h3>Also with you <span class="count"><?= count($also_serving) ?></span></h3>
+                    <div class="chip-list">
+                        <?php foreach ($also_serving as $row): ?>
+                        <button type="button" class="chip <?= lane_class($row['priority']) ?>" data-open-dialog="servingDialog-<?= (int) $row['id'] ?>"><?= htmlspecialchars($row['queue_number']) ?><small>Table <?= htmlspecialchars($row['table_number']) ?></small></button>
+                        <?php endforeach; ?>
+                    </div>
+                    <p class="hint">Tap a number for Served, Call again, Pending, Transfer or Cancel.</p>
+                </section>
+                <?php endif; ?>
+
+                <?php if ($current && $anyone_waiting): ?>
+                <section class="side-panel" aria-label="Next up">
+                    <h3>Next up</h3>
+                    <div class="btn-row">
+                        <?php foreach ($lane_buttons as $lane => [$label, $letter, $class]): if (!$lanes[$lane]) continue; $row = $lanes[$lane]; ?>
+                        <form method="post">
+                            <input type="hidden" name="serve" value="1">
+                            <?= identity_fields($doctor_name, $table_number) ?>
+                            <button type="submit" name="serve_id" value="<?= (int) $row['id'] ?>" class="btn btn-outline btn-sm <?= $class ?>"><?= htmlspecialchars(ucfirst(str_replace('Next ', '', $label))) ?> #<?= htmlspecialchars($row['queue_number']) ?></button>
+                        </form>
+                        <?php endforeach; ?>
+                    </div>
+                    <p class="hint">Finish with #<?= htmlspecialchars($current['queue_number']) ?> first, unless you need to serve two at once.</p>
+                </section>
+                <?php endif; ?>
+
+                <section class="side-panel" aria-label="Came back">
+                    <h3>Came back · Table <?= htmlspecialchars($table_number) ?> <span class="count"><?= count($came_back_list) ?></span></h3>
+                    <?php if (!$came_back_list): ?>
+                    <div class="empty-note">No one came back.</div>
+                    <?php else: ?>
+                    <div class="chip-list">
+                        <?php foreach ($came_back_list as $row): ?>
+                        <form method="post">
+                            <input type="hidden" name="serve" value="1">
+                            <?= identity_fields($doctor_name, $table_number) ?>
+                            <button type="submit" name="serve_id" value="<?= (int) $row['id'] ?>" class="chip cameback"><?= htmlspecialchars($row['queue_number']) ?><small>Serve</small></button>
+                        </form>
+                        <?php endforeach; ?>
+                    </div>
+                    <p class="hint">Tap a number to serve that patient now.</p>
+                    <?php endif; ?>
+                </section>
+
+                <section class="side-panel" aria-label="Pending">
+                    <h3>Pending · Table <?= htmlspecialchars($table_number) ?> <span class="count"><?= count($pending_list) ?></span></h3>
+                    <?php if (!$pending_list): ?>
+                    <div class="empty-note">No one sent back for requirements.</div>
+                    <?php else: ?>
+                    <div class="chip-list">
+                        <?php foreach ($pending_list as $row): ?>
+                        <span class="chip pending"><?= htmlspecialchars($row['queue_number']) ?><small><?= htmlspecialchars($row['doctor_name']) ?></small></span>
+                        <?php endforeach; ?>
+                    </div>
+                    <p class="hint">Getting their requirements. The front desk confirms them when they return.</p>
+                    <?php endif; ?>
+                </section>
+
+                <section class="side-panel" aria-label="Today">
+                    <div class="today-line">
+                        You today: <strong><?= (int) $current_served ?></strong> served · <strong><?= (int) $current_cancelled ?></strong> cancelled
+                        <?php if ($table_served_counts): ?>
+                        <br>Served per table:
+                        <?php foreach ($table_served_counts as $tnum => $cnt): ?>
+                        <span class="badge badge-completed">T<?= htmlspecialchars($tnum) ?>: <?= (int) $cnt ?></span>
+                        <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </section>
+            </aside>
+        </div>
+
+        <?php
+        foreach ($serving_list as $row) {
+            render_serving_dialogs($row, $doctor_name, $table_number);
+        }
+        foreach ($also_serving as $row): ?>
+        <div id="servingDialog-<?= (int) $row['id'] ?>" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="servingTitle-<?= (int) $row['id'] ?>">
+            <div class="modal-box dialog-box dialog-wide">
+                <h3 id="servingTitle-<?= (int) $row['id'] ?>">Also with you</h3>
+                <div class="dialog-number"><?= htmlspecialchars($row['queue_number']) ?></div>
+                <div class="dialog-badge"><?= lane_badge($row['priority']) ?></div>
+                <p><?= htmlspecialchars($row['doctor_name']) ?><?= ($row['doctor_name'] && $row['table_number']) ? ' · Table ' : '' ?><?= htmlspecialchars($row['table_number']) ?></p>
+                <div class="hero-card" style="min-height:0;padding:14px;">
+                    <?php render_serving_actions($row, $doctor_name, $table_number, false); ?>
+                </div>
+                <div class="dialog-actions" style="margin-top:14px;">
+                    <button type="button" class="btn btn-subtle" data-close-dialog data-autofocus>Close</button>
+                </div>
             </div>
         </div>
-        </div> <!-- end .main-columns -->
+        <?php endforeach; ?>
+
         <?php endif; ?>
     </div>
     <?php require 'partials/footer.php'; ?>
+
+    <script src="assets/app.js?v=<?= filemtime(__DIR__ . '/assets/app.js') ?>"></script>
+    <script>
+    <?php if ($show_name_card): ?>
+    // Enter in the name box would submit with the first table button; go to
+    // the table buttons instead, so the doctor picks the table on purpose.
+    document.getElementById('doctor_name').addEventListener('keydown', function(e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        if (!this.value.trim()) return;
+        const btn = document.querySelector('#doctorForm .table-picker .is-current') || document.querySelector('#doctorForm .table-picker .btn');
+        if (btn) btn.focus();
+    });
+    <?php else: ?>
+    QueueUI.startPolling({ interval: 1000 });
+    <?php if ($flash !== ''): ?>
+    QueueUI.toast(<?= json_encode($flash) ?>, ' The display board announces it.', '', 5000);
+    <?php endif; ?>
+
+    // Focus the most likely next action after every reload, so Enter and the
+    // keyboard letters work without a mouse click first.
+    (function() {
+        const target = document.querySelector('button[name=done]')
+            || document.querySelector('.lane-actions button[name=serve_id]');
+        if (target) target.focus();
+    })();
+    <?php endif; ?>
+    </script>
 </body>
 </html>
