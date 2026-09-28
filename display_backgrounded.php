@@ -66,10 +66,7 @@ pollQueueStatus();
 </script>
 </head>
 <body>
-    <div class="kiosk-header">
-        <div class="logo"><img src="CHO.png" alt="CHO Logo"></div>
-        <div class="title">OPD Queueing</div>
-    </div>
+    <?php require 'partials/kiosk_header.php'; ?>
     <div class="kiosk-body">
         <div class="kiosk-stats">
             <div class="kiosk-stat">
@@ -217,5 +214,6 @@ pollQueueStatus();
             </div>
         </div>
     </div>
+    <?php require 'partials/kiosk_footer.php'; ?>
 </body>
 </html>

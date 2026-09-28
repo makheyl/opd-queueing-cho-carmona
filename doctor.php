@@ -247,11 +247,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OPD Queueing — Doctor Panel</title>
 <link rel="stylesheet" href="assets/theme.css">
-<style>
-    .queue-card.doctor-card { width: 190px; min-height: 150px; cursor: pointer; }
-    .transfer-box { display: none; gap: 6px; align-items: center; justify-content: center; margin-top: 4px; flex-wrap: wrap; width: 100%; }
-    .transfer-box input { width: 130px; }
-</style>
 <script>
     // Track click counts for each card
     const clickCounts = {};
@@ -266,6 +261,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     function hideForm(id) {
         document.getElementById('form-' + id).style.display = 'none';
+    }
+    // Keyboard support for clickable queue cards (Enter / Space activates, same as a click)
+    function cardKeydown(event, id) {
+        if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+            event.preventDefault();
+            showForm(id);
+        }
     }
 
     // Toggle transfer input visibility for a serving card
@@ -326,11 +328,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </script>
 </head>
 <body>
-    <div class="app-header">
-        <img src="CHO.png" alt="CHO Logo" class="logo-img">
-        <div class="title">OPD Queueing</div>
-        <div class="subtitle">Doctor Panel</div>
-    </div>
+    <?php $page_subtitle = 'Doctor Panel'; require 'partials/header.php'; ?>
     <div class="page page-wide">
         <form class="toolbar-form" method="get">
             <label for="doctor_name">Your Name</label>
@@ -422,7 +420,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
                 ?>
-                <div class="queue-card doctor-card clickable<?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious') echo ' priority'; if ($row['priority'] === 'completed') echo ' completed'; if ($row['priority'] === 'came_back') echo ' cameback'; ?>" onclick="showForm(<?= $row['id'] ?>)">
+                <div class="queue-card doctor-card clickable<?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious') echo ' priority'; if ($row['priority'] === 'completed') echo ' completed'; if ($row['priority'] === 'came_back') echo ' cameback'; ?>" onclick="showForm(<?= $row['id'] ?>)" onkeydown="cardKeydown(event, <?= $row['id'] ?>)" tabindex="0" role="button">
                     <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
                     <?php if ($row['priority'] === 'yes'): ?>
                         <span class="badge badge-priority">PRIORITY</span>
@@ -462,7 +460,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <input type="hidden" name="notify_id" value="<?= $row['id'] ?>">
                         <input type="hidden" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>">
                         <input type="hidden" name="table_number" value="<?= htmlspecialchars($table_number) ?>">
-                        <button type="submit" name="notify" class="btn btn-info btn-xs">Notify</button>
+                        <button type="submit" name="notify" class="btn btn-info btn-xs"><?= opd_icon('bell') ?> Notify</button>
                     </form>
                     <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
                     <?php if ($row['priority'] === 'yes'): ?>
@@ -495,7 +493,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <input type="hidden" name="cancel_id" value="<?= $row['id'] ?>">
                             <input type="hidden" name="doctor_name" value="<?= htmlspecialchars($doctor_name) ?>">
                             <input type="hidden" name="table_number" value="<?= htmlspecialchars($table_number) ?>">
-                            <button type="submit" name="cancel" class="btn btn-danger btn-xs">Cancel</button>
+                            <button type="submit" name="cancel" class="btn btn-danger btn-xs"><?= opd_icon('x-circle') ?> Cancel</button>
                         </form>
                     </div>
                     <form method="post" id="transfer-box-<?= $row['id'] ?>" class="transfer-box">
@@ -529,7 +527,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <h3 class="section-title accent-pink">Came Back Patients</h3>
             <div class="queue-grid">
                 <?php if ($came_back && $came_back->num_rows > 0): while($row = $came_back->fetch_assoc()): ?>
-                <div class="queue-card doctor-card clickable cameback" onclick="showForm(<?= $row['id'] ?>)">
+                <div class="queue-card doctor-card clickable cameback" onclick="showForm(<?= $row['id'] ?>)" onkeydown="cardKeydown(event, <?= $row['id'] ?>)" tabindex="0" role="button">
                     <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
                     <span class="badge badge-cameback">CAME BACK</span>
                     <?php if (!empty($row['doctor_name']) || !empty($row['table_number'])): ?>
@@ -552,5 +550,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div> <!-- end .main-columns -->
         <?php endif; ?>
     </div>
+    <?php require 'partials/footer.php'; ?>
 </body>
 </html>

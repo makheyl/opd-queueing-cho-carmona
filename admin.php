@@ -201,24 +201,11 @@ if (isset($_POST['export_csv'])) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Admin Reports — Doctor Appointments Log</title>
 <link rel="stylesheet" href="assets/theme.css">
-<style>
-    .reports-title { text-align: center; color: var(--green-dark); font-size: 1.6rem; margin-bottom: 24px; }
-    .print-btn-area { display: flex; justify-content: center; align-items: center; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
-    .stats-section { margin-top: 28px; padding: 22px; background: var(--surface-alt); border-radius: var(--radius-lg); border: 1px solid var(--border); }
-    .stats-section h3 { color: var(--green-dark); margin-bottom: 12px; font-size: 1.05rem; }
-    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 14px; }
-    .mini-stat { background: var(--surface); padding: 16px; border-radius: var(--radius-sm); border: 1px solid var(--border); text-align: center; }
-    .mini-stat h4 { margin: 0 0 8px; color: var(--green-dark); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.03em; }
-    .mini-stat .value { font-size: 1.8rem; font-weight: 800; color: var(--text); }
-</style>
 </head>
 <body>
-    <div class="app-header">
-        <div class="title">OPD Queueing</div>
-        <div class="subtitle">Admin Reports</div>
-    </div>
+    <?php $page_subtitle = 'Admin Reports'; require 'partials/header.php'; ?>
     <div class="page">
-        <h1 class="reports-title">Doctor Appointments Log &amp; Statistics</h1>
+        <h1 class="page-title">Doctor Appointments Log &amp; Statistics</h1>
         <form method="get" class="toolbar-form no-print">
             <label for="date">Base Date</label>
             <input class="field" type="date" id="date" name="date" value="<?= htmlspecialchars($date) ?>">
@@ -230,13 +217,13 @@ if (isset($_POST['export_csv'])) {
             </select>
             <button type="submit" class="btn">Filter</button>
         </form>
-        <div class="print-btn-area no-print">
-            <button class="btn btn-outline" onclick="window.print()">Print / Save as PDF</button>
-            <button class="btn btn-outline" type="button" onclick="toggleDetails()">Show/Hide Detailed Report</button>
+        <div class="toolbar-form no-print">
+            <button class="btn btn-outline" onclick="window.print()"><?= opd_icon('printer') ?> Print / Save as PDF</button>
+            <button class="btn btn-subtle" type="button" onclick="toggleDetails()">Show/Hide Detailed Report</button>
             <form method="post" style="display:inline;">
                 <input type="hidden" name="export_date" value="<?= htmlspecialchars($date) ?>">
                 <input type="hidden" name="export_period" value="<?= htmlspecialchars($period) ?>">
-                <button type="submit" name="export_csv" class="btn">Export to CSV</button>
+                <button type="submit" name="export_csv" class="btn"><?= opd_icon('download') ?> Export to CSV</button>
             </form>
         </div>
 
@@ -388,5 +375,6 @@ if (isset($_POST['export_csv'])) {
         </div>
         <?php endif; ?>
     </div>
+    <?php require 'partials/footer.php'; ?>
 </body>
 </html>

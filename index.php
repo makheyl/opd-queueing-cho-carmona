@@ -166,11 +166,7 @@ if (isset($_POST['remove_waiting'])) {
 </script>
 </head>
 <body>
-    <div class="app-header">
-        <img src="CHO.png" alt="CHO Logo" class="logo-img">
-        <div class="title">OPD Queueing</div>
-        <div class="subtitle">Operator Console</div>
-    </div>
+    <?php $page_subtitle = 'Operator Console'; require 'partials/header.php'; ?>
     <div class="page">
         <?php if (!empty($error_message)): ?>
             <div class="alert alert-error"><?= htmlspecialchars($error_message) ?></div>
@@ -267,7 +263,7 @@ if (isset($_POST['remove_waiting'])) {
                             <td>
                                 <form method="post">
                                     <input type="hidden" name="remove_waiting_id" value="<?= $row['id'] ?>">
-                                    <button type="submit" name="remove_waiting" class="btn btn-danger btn-sm">Remove</button>
+                                    <button type="submit" name="remove_waiting" class="btn btn-danger btn-sm"><?= opd_icon('trash') ?> Remove</button>
                                 </form>
                             </td>
                         </tr>
@@ -331,7 +327,7 @@ if (isset($_POST['remove_waiting'])) {
                         <form method="post" class="card-form" style="gap:8px;">
                             <input type="hidden" name="confirm_cancel_id" value="<?= $row['id'] ?>">
                             <button type="submit" name="requeue_cancelled" class="btn btn-sm">Requeue</button>
-                            <button type="submit" name="remove_cancelled" class="btn btn-danger btn-sm">Remove Number</button>
+                            <button type="submit" name="remove_cancelled" class="btn btn-danger btn-sm"><?= opd_icon('trash') ?> Remove Number</button>
                         </form>
                     </div>
                     <?php endwhile; endif; ?>
@@ -358,6 +354,7 @@ if (isset($_POST['remove_waiting'])) {
             </div>
         </div>
     </div>
+    <?php require 'partials/footer.php'; ?>
 
     <script>
         // Modal open/close logic for Waiting List
