@@ -64,6 +64,29 @@ CREATE TABLE IF NOT EXISTS `historical_data` (
 );
 ```
 
+### 4. `settings`
+Key/value settings for the ticket printer. They are edited on the **Printer** screen (`printer_setup.php`), not by hand.
+
+```sql
+CREATE TABLE IF NOT EXISTS `settings` (
+  `key` varchar(50) NOT NULL,
+  `value` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`key`)
+);
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `ticket_printing_enabled` | `1` | `0` = printing OFF: numbers are still issued, staff write them on a slip |
+| `ticket_header` | `CITY HEALTH OFFICE` | First line of the ticket |
+| `ticket_subheader` | `OUTPATIENT DEPARTMENT` | Second line |
+| `ticket_footer` | "Please keep this ticket…" | Text under the number (may be blank) |
+| `ticket_show_logo` | `1` | Print the CHO logo |
+| `ticket_show_waiting` | `1` | Print "Patients waiting now: N" (a plain total, not "ahead of you") |
+| `ticket_width_mm` | `72` | Printable width of the 80 mm roll (48–80) |
+
+The seed rows use `ON DUPLICATE KEY UPDATE key = key`, so re-running the script adds missing keys and keeps values already changed on the Printer screen.
+
 ## Setup Instructions
 
 ### 1. Run Database Setup
@@ -72,6 +95,14 @@ Execute the SQL commands in `database_setup.sql` to create the required tables:
 ```bash
 mysql -u root -p opdqueue < database_setup.sql
 ```
+
+**One-time step after the ticket printer update.** Existing installations need the new `settings` table. Run the script once on the server (it is safe to re-run: existing tables and edited settings are left alone):
+
+```
+C:\xampp\mysql\bin\mysql.exe -u root opdqueue < C:\xampp\htdocs\PHPOPDQueueing\database_setup.sql
+```
+
+Then open `test_database.php` (or run `C:\xampp\php\php.exe test_database.php`). Every line should have a check mark, including the `settings` table and its seven `ticket_*` keys. `config.php` does **not** create this table by itself: until the script is run, tickets print with the default text and the Printer screen shows a warning instead of saving.
 
 ### 2. Schedule Daily Reset
 Set up the daily reset script to run automatically at midnight:
@@ -120,32 +151,68 @@ Set up the daily reset script to run automatically at midnight:
 ```
 PHPOPDQueueing/
 ├── config.php                 # Database configuration
-├── database_setup.sql         # Database table creation
-├── daily_reset.php           # Daily reset script
-├── doctor.php                # Doctor panel (updated)
-├── admin.php                 # Admin reports (updated)
-├── index.php                 # Main queue interface
-├── display.php               # Queue display
-├── exports/                  # CSV export directory
+├── database_setup.sql         # Database table creation (incl. settings)
+├── opd_functions.php          # Shared logic: settings, ticket numbers, voice call list
+├── daily_reset.php            # Daily reset script
+├── index.php                  # Front Desk: print numbers, waiting list, "Needs you"
+├── doctor.php                 # Doctor: pick a table, serve patients by lane
+├── admin.php                  # Reports: Today / Week / Month, CSV export, print
+├── printer_setup.php          # Printer: ticket station, ticket settings, Test Print
+├── ticket_print.php           # The 80 mm ticket page (read-only, printed by the browser)
+├── display.php                # Waiting-area display board (speaks the calls)
+├── display_backgrounded.php   # Alternative display board layout (same voice)
+├── queue_status.php           # Small JSON the screens poll to know when to refresh
+├── notify.json                # Runtime file: last 20 voice calls (not committed)
+├── clear_notify.php           # Legacy, no longer used (see below)
+├── test_database.php          # Checks the tables and settings
+├── test_issue_number.php      # Ticket number tests (throwaway database only)
+├── assets/
+│   ├── theme.css              # Staff screens
+│   ├── display.css            # Display board
+│   ├── app.js                 # Staff screens: refresh, pop-ups, shortcuts, toasts
+│   ├── board.js               # Display board: voice calls and in-place refresh
+│   └── clock.js               # Live clock in the headers
+├── partials/                  # Shared header (with the top menu), footer, icons
+├── exports/                   # CSV export directory
 │   └── daily_report_YYYY-MM-DD.csv
-└── README_DATABASE_SETUP.md  # This file
+├── OPERATIONS.md              # Day-to-day guide: screens, printer, voice
+└── README_DATABASE_SETUP.md   # This file
 ```
+
+### Voice calls and `notify.json`
+When a doctor presses **Serve** or **Call again**, `announce_call()` (in `opd_functions.php`) appends the call to `notify.json`, which keeps the last 20 calls. Every open display board reads the list and speaks each new call once, in order. Nothing deletes entries, so several boards can run at once.
+
+`clear_notify.php` is **legacy**. It emptied `notify.json` after one board had spoken, which meant only one board heard each call and fast calls cut each other off. No screen calls it anymore. The file is kept in the folder, unused; don't link to it.
+
+### Testing changes
+Never test against the live `opdqueue` database. Make a throwaway copy of the folder (e.g. `PHPOPDQueueing_uitest`) and a schema-only database, point the copy's `config.php` at it, and delete both afterwards:
+
+```
+C:\xampp\mysql\bin\mysql.exe -u root -e "CREATE DATABASE opdqueue_uitest"
+C:\xampp\mysql\bin\mysqldump.exe -u root --no-data opdqueue | C:\xampp\mysql\bin\mysql.exe -u root opdqueue_uitest
+C:\xampp\mysql\bin\mysql.exe -u root opdqueue_uitest < database_setup.sql
+C:\xampp\php\php.exe test_issue_number.php
+```
+
+`test_issue_number.php` refuses to run unless the `queue` table is empty.
 
 ## Usage
 
 ### For Doctors:
-1. Access `doctor.php`
-2. Enter name and table number
-3. View real-time statistics
-4. Serve, pending, or cancel patients
+1. Open **Doctor** in the top menu (`doctor.php`)
+2. Type or pick your name, then tap your table
+3. Tap the next patient of the lane you want to serve
+4. Press **SERVED** when done, or Call again / Pending / Transfer / Cancel
 5. Statistics update automatically
 
 ### For Administrators:
-1. Access `admin.php`
-2. Select date to view statistics
+1. Open **Reports** in the top menu (`admin.php`)
+2. Choose Today, This Week, This Month, or another day
 3. Export data to CSV
 4. Print reports
 5. Monitor daily trends
+
+See `OPERATIONS.md` for the Front Desk, the ticket printer and the display board.
 
 ### Daily Reset Process:
 1. Runs automatically at midnight
