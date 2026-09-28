@@ -1,5 +1,6 @@
 <?php
 require 'config.php';
+require 'opd_functions.php';
 $waiting = $conn->query("SELECT * FROM queue WHERE status='waiting'
     ORDER BY
         (priority='yes') DESC,
@@ -15,62 +16,12 @@ $pending = $conn->query("SELECT * FROM queue WHERE status='pending' ORDER BY que
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Queue Display</title>
-<link rel="stylesheet" href="assets/display.css">
-<script>
-let lastNotified = 0;
-function pollNotify() {
-    fetch('notify.json?rand=' + Math.random())
-        .then(res => res.json())
-        .then(data => {
-            let shouldClear = false;
-            if (data && data.timestamp && data.timestamp > lastNotified) {
-                lastNotified = data.timestamp;
-                const msg = `Queue number ${data.queue_number}, queue number ${data.queue_number}, please proceed to table ${data.table_number}`;
-                if ('speechSynthesis' in window) {
-                    window.speechSynthesis.cancel();
-                    const utter = new SpeechSynthesisUtterance(msg);
-                    utter.lang = 'en-US';
-                    window.speechSynthesis.speak(utter);
-                }
-                shouldClear = true;
-            } else if (data && Object.keys(data).length > 0) {
-                // If notify.json is not empty but not a new notification, clear it to avoid stale data
-                shouldClear = true;
-            }
-            if (shouldClear) {
-                fetch('clear_notify.php?rand=' + Math.random());
-            }
-        })
-        .catch(() => {
-            // Always attempt to clear notify.json on error, in case of corrupted file
-            fetch('clear_notify.php?rand=' + Math.random());
-        });
-    setTimeout(pollNotify, 50);
-}
-document.addEventListener('DOMContentLoaded', pollNotify);
-// Add smart refresh on DB update
-let lastStatus = null;
-async function pollQueueStatus() {
-    try {
-        const res = await fetch('queue_status.php');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (lastStatus === null) {
-            lastStatus = JSON.stringify(data);
-        } else if (JSON.stringify(data) !== lastStatus) {
-            location.reload();
-        }
-    } catch (e) {}
-    setTimeout(pollQueueStatus, 3000);
-}
-pollQueueStatus();
-</script>
+<link rel="stylesheet" href="assets/display.css?v=<?= filemtime(__DIR__ . '/assets/display.css') ?>">
+<script src="assets/board.js?v=<?= filemtime(__DIR__ . '/assets/board.js') ?>"></script>
+<script>QueueBoard.start({ refreshUrl: 'display.php' });</script>
 </head>
 <body>
-    <div class="kiosk-header">
-        <div class="logo"><img src="CHO.png" alt="CHO Logo"></div>
-        <div class="title">OPD Queueing</div>
-    </div>
+    <?php require 'partials/kiosk_header.php'; ?>
     <div class="kiosk-body">
         <div class="kiosk-stats">
             <div class="kiosk-stat">
@@ -126,30 +77,25 @@ pollQueueStatus();
             </div>
             <div class="kiosk-col serving-col">
                 <h2>Currently Serving</h2>
-                <div class="kiosk-cards serving-cards">
+                <div class="kiosk-cards serving-cards" style="--tables: <?= OPD_TABLE_COUNT ?>;">
                     <?php
-                    // Create arrays for each table
-                    $table1_patients = [];
-                    $table2_patients = [];
-                    $table3_patients = [];
-                    $table4_patients = [];
+                    // One column per consultation table (OPD_TABLE_COUNT in opd_functions.php)
+                    $table_patients = array_fill_keys(range(1, OPD_TABLE_COUNT), []);
 
                     $serving->data_seek(0);
                     while($row = $serving->fetch_assoc()) {
-                        $table_num = $row['table_number'] ?? 0;
-                        if ($table_num == 1) $table1_patients[] = $row;
-                        elseif ($table_num == 2) $table2_patients[] = $row;
-                        elseif ($table_num == 3) $table3_patients[] = $row;
-                        elseif ($table_num == 4) $table4_patients[] = $row;
-                        else $table1_patients[] = $row; // Default to table 1 if no table number
+                        $table_num = (int) ($row['table_number'] ?? 0);
+                        if (isset($table_patients[$table_num])) $table_patients[$table_num][] = $row;
+                        else $table_patients[1][] = $row; // Default to table 1 if no table number
                     }
                     ?>
 
-                    <!-- Table 1 -->
+                    <?php foreach ($table_patients as $table_num => $patients): ?>
                     <div class="table-column">
-                        <div class="table-header">Table 1</div>
-                        <?php foreach($table1_patients as $row): ?>
-                        <div class="kiosk-card serving-card<?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious') echo ' priority'; if ($row['priority'] === 'completed') echo ' completed'; ?>">
+                        <div class="table-header">Table <?= $table_num ?></div>
+                        <?php foreach($patients as $row): ?>
+                        <!-- id: board.js flashes this card while its number is announced -->
+                        <div class="kiosk-card serving-card<?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious') echo ' priority'; if ($row['priority'] === 'completed') echo ' completed'; ?>" id="serving-<?= (int) $row['queue_number'] ?>">
                             <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
                             <?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious'): ?>
                                 <span class="badge badge-priority">PRIORITY</span>
@@ -159,51 +105,7 @@ pollQueueStatus();
                         </div>
                         <?php endforeach; ?>
                     </div>
-
-                    <!-- Table 2 -->
-                    <div class="table-column">
-                        <div class="table-header">Table 2</div>
-                        <?php foreach($table2_patients as $row): ?>
-                        <div class="kiosk-card serving-card<?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious') echo ' priority'; if ($row['priority'] === 'completed') echo ' completed'; ?>">
-                            <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
-                            <?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious'): ?>
-                                <span class="badge badge-priority">PRIORITY</span>
-                            <?php elseif ($row['priority'] === 'completed'): ?>
-                                <span class="badge badge-completed">COMPLETED</span>
-                            <?php endif; ?>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-
-                    <!-- Table 3 -->
-                    <div class="table-column">
-                        <div class="table-header">Table 3</div>
-                        <?php foreach($table3_patients as $row): ?>
-                        <div class="kiosk-card serving-card<?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious') echo ' priority'; if ($row['priority'] === 'completed') echo ' completed'; ?>">
-                            <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
-                            <?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious'): ?>
-                                <span class="badge badge-priority">PRIORITY</span>
-                            <?php elseif ($row['priority'] === 'completed'): ?>
-                                <span class="badge badge-completed">COMPLETED</span>
-                            <?php endif; ?>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-
-                    <!-- Table 4 -->
-                    <div class="table-column">
-                        <div class="table-header">Table 4</div>
-                        <?php foreach($table4_patients as $row): ?>
-                        <div class="kiosk-card serving-card<?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious') echo ' priority'; if ($row['priority'] === 'completed') echo ' completed'; ?>">
-                            <span class="queue-number"><?= htmlspecialchars($row['queue_number']) ?></span>
-                            <?php if ($row['priority'] === 'yes' || $row['priority'] === 'infectious'): ?>
-                                <span class="badge badge-priority">PRIORITY</span>
-                            <?php elseif ($row['priority'] === 'completed'): ?>
-                                <span class="badge badge-completed">COMPLETED</span>
-                            <?php endif; ?>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
+                    <?php endforeach; ?>
                 </div>
             </div>
             <div class="kiosk-col pending-col">
@@ -226,5 +128,6 @@ pollQueueStatus();
             </div>
         </div>
     </div>
+    <?php require 'partials/kiosk_footer.php'; ?>
 </body>
 </html>

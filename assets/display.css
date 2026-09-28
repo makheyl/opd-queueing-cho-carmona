@@ -42,15 +42,21 @@ html, body {
     color: var(--text);
 }
 
+body {
+    display: flex;
+    flex-direction: column;
+}
+
 .kiosk-header {
     width: 100%;
     background: var(--green);
-    padding: 16px 0;
+    padding: 14px 0;
     display: flex;
     align-items: center;
     gap: 16px;
     box-sizing: border-box;
     box-shadow: 0 2px 12px rgba(34, 195, 105, 0.25);
+    flex: 0 0 auto;
 }
 .kiosk-header .logo {
     margin-left: 36px;
@@ -71,17 +77,53 @@ html, body {
     font-weight: 700;
     letter-spacing: 0.3px;
 }
+.kiosk-header .header-clock {
+    margin-left: auto;
+    margin-right: 36px;
+    text-align: right;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.2;
+    flex-shrink: 0;
+}
+.kiosk-header .header-clock .clock-time {
+    font-size: clamp(1.1rem, 1.8vw, 1.6rem);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+.kiosk-header .header-clock .clock-date {
+    font-size: clamp(0.7rem, 1vw, 0.9rem);
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+.kiosk-footer {
+    flex: 0 0 auto;
+    width: 100%;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 5px 20px;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 0.72rem;
+    font-weight: 600;
+    box-sizing: border-box;
+}
 
 .kiosk-body {
     width: 100vw;
     min-width: 320px;
     margin: 0 auto;
     background: var(--surface);
-    padding: 1vw 1vw 1.6vw;
+    padding: 1vw 1vw 0.6vw;
     display: flex;
     flex-direction: column;
     align-items: center;
     box-sizing: border-box;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .kiosk-stats {
@@ -123,6 +165,8 @@ html, body {
     margin-top: 0.4vw;
     flex-wrap: nowrap;
     overflow: hidden;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .kiosk-col {
@@ -137,7 +181,8 @@ html, body {
     flex-direction: column;
     align-items: center;
     margin: 0 0.3vw;
-    max-height: 80vh;
+    height: 100%;
+    max-height: 100%;
     overflow: hidden;
 }
 .kiosk-col h2 {
@@ -266,7 +311,7 @@ html, body {
 /* Serving column: table groups */
 .serving-cards {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(var(--tables, 4), 1fr); /* --tables: OPD_TABLE_COUNT, set by display.php */
     gap: 0.8vw;
     width: 100%;
     justify-items: center;
@@ -319,6 +364,9 @@ html, body {
     .kiosk-header { padding: 12px 0; gap: 12px; }
     .kiosk-header .logo { margin-left: 18px; width: 38px; height: 38px; }
     .kiosk-header .title { font-size: 1.3rem; }
+    .kiosk-header .header-clock { margin-right: 16px; }
+    .kiosk-header .header-clock .clock-time { font-size: 1rem; }
+    .kiosk-header .header-clock .clock-date { font-size: 0.65rem; }
     .kiosk-body { padding: 10px; }
     .kiosk-stats { gap: 16px; margin-bottom: 12px; }
     .kiosk-stat { padding: 8px 20px; min-width: 130px; }
@@ -341,4 +389,17 @@ html, body {
     .kiosk-stat .value { font-size: 1.4rem; }
     .serving-cards { grid-template-columns: 1fr; }
     .waiting-col .kiosk-cards, .pending-col .kiosk-cards { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Called number: the serving card pulses while its number is announced
+   (assets/board.js adds the class for ~10 s). About 1 Hz, far from the ~3 Hz
+   photosensitive threshold, so don't speed it up. */
+@keyframes board-flash-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+.kiosk-card.board-flashing {
+    outline: 4px solid var(--orange);
+    outline-offset: 3px;
+    animation: board-flash-pulse 1s ease-in-out infinite;
 }

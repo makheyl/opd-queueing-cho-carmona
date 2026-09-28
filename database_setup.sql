@@ -51,3 +51,23 @@ CREATE TABLE IF NOT EXISTS `historical_data` (
   KEY `idx_date` (`date`),
   KEY `idx_exported` (`exported_to_csv`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci; 
+
+-- Create settings table for the ticket printer (XP-80) settings.
+-- Edited on printer_setup.php. Safe to re-run: existing tables are left alone,
+-- and the INSERT below only adds keys that are missing, so values already
+-- changed on the Printer screen are kept.
+CREATE TABLE IF NOT EXISTS `settings` (
+  `key` varchar(50) NOT NULL,
+  `value` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `settings` (`key`, `value`) VALUES
+  ('ticket_printing_enabled', '1'),
+  ('ticket_header', 'CITY HEALTH OFFICE'),
+  ('ticket_subheader', 'OUTPATIENT DEPARTMENT'),
+  ('ticket_footer', 'Please keep this ticket and wait for your number to be called.'),
+  ('ticket_show_logo', '1'),
+  ('ticket_show_waiting', '1'),
+  ('ticket_width_mm', '72')
+ON DUPLICATE KEY UPDATE `key` = `key`;
