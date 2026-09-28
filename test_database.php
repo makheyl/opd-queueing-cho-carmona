@@ -45,7 +45,7 @@ if ($is_web) {
 }
 
 // Test 1: Check if tables exist
-$tables = ['doctor_appointments_log', 'daily_statistics', 'historical_data'];
+$tables = ['doctor_appointments_log', 'daily_statistics', 'historical_data', 'settings'];
 $all_tables_exist = true;
 
 foreach ($tables as $table) {
@@ -110,6 +110,34 @@ if ($result) {
     db_check_line("Error checking historical_data structure: " . $conn->error, false, $is_web);
 }
 
+// Test settings: the ticket printer keys. Their values are edited on
+// printer_setup.php, so only check that each key exists.
+$ticket_keys = ['ticket_printing_enabled', 'ticket_header', 'ticket_subheader', 'ticket_footer',
+    'ticket_show_logo', 'ticket_show_waiting', 'ticket_width_mm'];
+$stmt = $conn->prepare("SELECT `key` FROM settings");
+$stmt->execute();
+$present_keys = array_column($stmt->get_result()->fetch_all(MYSQLI_ASSOC), 'key');
+$stmt->close();
+$settings_ok = true;
+foreach ($ticket_keys as $key) {
+    $ok = in_array($key, $present_keys, true);
+    db_check_line($ok ? "Setting '$key' exists" : "Setting '$key' is missing", $ok, $is_web);
+    if (!$ok) $settings_ok = false;
+}
+
+if (!$settings_ok) {
+    if ($is_web) {
+        echo '</ul>';
+        echo '<div class="check-summary bad">' . opd_icon('x-circle') . ' Some ticket settings are missing. Run database_setup.sql again (it is safe to re-run).</div>';
+        echo '</div>'; // .page
+        require 'partials/footer.php';
+        echo '</body></html>';
+    } else {
+        echo "\n\xe2\x9d\x8c Some ticket settings are missing. Run database_setup.sql again (it is safe to re-run).\n";
+    }
+    exit(1);
+}
+
 if ($is_web) {
     echo '</ul>';
     echo '<div class="check-summary ok">' . opd_icon('check') . ' Database setup is complete and working!</div>';
@@ -118,6 +146,7 @@ if ($is_web) {
     echo '<li class="check-item">1. Use the doctor panel (doctor.php)</li>';
     echo '<li class="check-item">2. View admin reports (admin.php)</li>';
     echo '<li class="check-item">3. Schedule the daily reset (daily_reset.php)</li>';
+    echo '<li class="check-item">4. Set up the ticket printer (printer_setup.php)</li>';
     echo '</ul></div>';
     echo '</div>'; // .page
     require 'partials/footer.php';
@@ -128,4 +157,5 @@ if ($is_web) {
     echo "1. Use the doctor panel (doctor.php)\n";
     echo "2. View admin reports (admin.php)\n";
     echo "3. Schedule the daily reset (daily_reset.php)\n";
+    echo "4. Set up the ticket printer (printer_setup.php)\n";
 }
