@@ -311,7 +311,7 @@ body {
 /* Serving column: table groups */
 .serving-cards {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(var(--tables, 4), 1fr); /* --tables: OPD_TABLE_COUNT, set by display.php */
     gap: 0.8vw;
     width: 100%;
     justify-items: center;
@@ -389,4 +389,17 @@ body {
     .kiosk-stat .value { font-size: 1.4rem; }
     .serving-cards { grid-template-columns: 1fr; }
     .waiting-col .kiosk-cards, .pending-col .kiosk-cards { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Called number: the serving card pulses while its number is announced
+   (assets/board.js adds the class for ~10 s). About 1 Hz, far from the ~3 Hz
+   photosensitive threshold, so don't speed it up. */
+@keyframes board-flash-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+.kiosk-card.board-flashing {
+    outline: 4px solid var(--orange);
+    outline-offset: 3px;
+    animation: board-flash-pulse 1s ease-in-out infinite;
 }
